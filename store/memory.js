@@ -76,7 +76,8 @@ var Memory = exports.Memory = function(options){
 	// start with the read-only memory store and add write support
 	var put = store.put = function(object, directives){
 		directives = directives || {};
-		var id = object.id = directives.id || object.id || Math.round(Math.random()*10000000000000);
+		var id = object.id = "id" in object ? object.id :
+					"id" in directives ? directives.id : Math.round(Math.random()*10000000000000);
 		var isNew = !(id in store.index);
 		if("overwrite" in directives){
 			if(directives.overwrite){
@@ -120,7 +121,9 @@ var Memory = exports.Memory = function(options){
 	store.indexes = {};
 	store.setIndex = function(index){
 		if(index instanceof Array){
-			log.push.apply(log, index);
+			if(log){
+				log.push.apply(log, index);
+			}
 			index.forEach(function(object){
 				if("__deleted__" in object){
 					delete store.index[object.__deleted__];
@@ -188,13 +191,13 @@ require("rql/js-array").operators.revisions = function(revision){
 }
 // Persistent store extends Memory to persist writes to fs
 
-var JSONExt = require("commonjs-utils/json-ext"),
+var JSONExt = require("../util/json-ext"),
 	fs = require("promised-io/fs"),
 	AutoTransaction = require("../transaction").AutoTransaction;
 
 var Persistent = exports.Persistent = function(options) {
 	options = options || {};
-	var path = options.path || require("commonjs-utils/settings").dataFolder || "data";
+	var path = options.path || require("../util/settings").dataFolder || "data";
 	if(options.filename){
 		initializeFile(options.filename);
 	}
@@ -220,8 +223,8 @@ var Persistent = exports.Persistent = function(options) {
 				if(buffer.charAt(0) == '{'){
 					buffer = '[' + buffer;
 				}
-				if(buffer.substring(buffer.length - 2,buffer.length) == ",\n"){
-					buffer = buffer.substring(0, buffer.length - 2) + "]";
+				if(buffer.match(/,\r?\n$/)){
+					buffer = buffer.replace(/,\r?\n$/,']');
 				}
 				try{
 					var data = eval(buffer);
@@ -231,6 +234,18 @@ var Persistent = exports.Persistent = function(options) {
 				}
 				// populate the store
 				store.setIndex(data);
+				if(options.log === false){
+					// rewrite the file if loging is disabled
+					data = [];
+					for(var i in store.index){
+						data.push(store.index[i]);
+					}
+					buffer = JSONExt.stringify(data);
+					buffer = buffer.substring(0, buffer.length - 1) + ',\n';
+					writeStream.close();
+					writeStream = fs.openSync(filename, "w");
+					writeStream.write(buffer);
+				}
 			}else if(!buffer || buffer.length == 0){
 				writeStream.write("[");
 			}

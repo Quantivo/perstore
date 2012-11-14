@@ -8,7 +8,7 @@ var first = require("promised-io/lazy-array").first,
 	AutoTransaction = require("../transaction").AutoTransaction,
 	parseQuery = require("rql/parser").parseQuery,
 	print = require("promised-io/process").print,
-	defineProperty = require("commonjs-utils/es5-helper").defineProperty,
+	defineProperty = require("../util/es5-helper").defineProperty,
 	when = require("promised-io/promise").when,
 	defer = require("promised-io/promise").defer,
 	sqlOperators = require("rql/parser").commonOperatorMap;
@@ -29,12 +29,8 @@ var safeSqlName = exports.safeSqlName = function(name){
 	return name;
 };
 
-try{
-	var SQLDatabase = require("store-engine/sql").SQLDatabase;
-}catch(e){
-	// outside of nodules this may fail
-	var SQLDatabase = require("../../engines/node/lib/store-engine/sql").SQLDatabase;
-}
+var SQLDatabase = typeof process != "undefined" ? require("../engines/node/store-engine/sql").SQLDatabase :
+	SQLDatabase = require("../engines/rhino/store-engine/sql").SQLDatabase;
 
 
 exports.SQLStore = function(config){
@@ -54,6 +50,7 @@ exports.SQLStore = function(config){
 		"delete": function(id){
 			return store.executeSql("DELETE FROM " + config.table + " WHERE " + idColumn + "=?", [id]); // Promise
 		},
+		identifyGeneratedKey: true,
 		add: function(object, directives){
 			var params = [], vals = [], cols = [];
 			for(var i in object){
@@ -63,7 +60,9 @@ exports.SQLStore = function(config){
 					params.push(object[i]);
 				}
 			}
-			params.idColumn = config.idColumn;
+			if(store.identifyGeneratedKey){
+				params.idColumn = config.idColumn;
+			}
 			var sql = "INSERT INTO " + config.table + " (" + cols.join(',') + ") VALUES (" + vals.join(',') + ")";
 			return when(store.executeSql(sql, params), function(results) {
 				var id = results.insertId;
@@ -247,7 +246,9 @@ exports.SQLStore = function(config){
 				results = results.rows;
 				if(count){
 					results.totalCount = count;
-					results.length = Math.min(limit, count);
+					when(count,function(count) {
+						results.length = Math.min(limit, count);
+					});
 				}
 				return results;
 			});
@@ -298,14 +299,16 @@ exports.SQLStore = function(config){
 		store[i] = dialect[i]
 	}
 	for(var i in config){
-		store[i] = config[i];
+		if(i != "type"){
+			store[i] = config[i];
+		}
 	}
 	
 	return AutoTransaction(store, database);
 }
 
 try{
-	var DATABASE = require("commonjs-utils/settings").database;
+	var DATABASE = require("../util/settings").database;
 }catch(e){
 	print("No settings file defined for a database " + e);
 }
@@ -345,7 +348,8 @@ exports.dialects = {
 				}
 			});
 			return schema;
-		}
+		},
+		identifyGeneratedKey: false
 	},
 	mssql:{
 		generateSqlWithLimit: function(structure, limit, offset){

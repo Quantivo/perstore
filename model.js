@@ -3,14 +3,11 @@ var Permissive = require("./facet").Permissive;
 var DefaultStore = require("./stores").DefaultStore,
 	transaction = require("./transaction").transaction,
 	NotFoundError = require("./errors").NotFoundError,
-	defineProperty = require("commonjs-utils/es5-helper").defineProperty,
-	JSONExt = require("commonjs-utils/json-ext"),
+	defineProperty = require("./util/es5-helper").defineProperty,
+	JSONExt = require("./util/json-ext"),
 	fs = require("promised-io/fs");
 
-exports.Store = function(name, store){
-	exports.Model(name, store,  {});//(store.getSchema ? store.getSchema() : {});
-}
-exports.Model = function(store, schema) {
+var Model = function(store, schema) {
 	if(typeof store == "string"){
 		throw new Error("Models should no longer be named, remove the name argument");
 	}
@@ -29,49 +26,22 @@ exports.Model = function(store, schema) {
 	}
 	defineProperty(schema, "transaction", {
 		get: function(){
-			return exports.currentTransaction;
+			return require("./transaction").currentTransaction;
 		}
 	});
 
 	return schema;
 };
-
-
-exports.transaction = function(){
-	var dbTransaction = transaction();
-	return exports.currentTransaction = {
-		get: exports.openObjectStore,
-		commit: function(){
-			try{
-				dbTransaction.commit();
-			}
-			finally{
-				exports.currentTransaction = null;
-			}
-		},
-		abort: function(){
-			try{
-				dbTransaction.abort();
-			}
-			finally{
-				exports.currentTransaction = null;
-			}
-		},
-		suspend: function(){
-			dbTransaction.suspend();
-		},
-		resume: function(){
-			dbTransaction.resume();
-		}
-	}
-
-};
+Model.Model = Model;
+Model.Store = function(store){
+	return Model(store,  {});//(store.getSchema ? store.getSchema() : {});
+}
 
 var modelPaths = {};
-exports.initializeRoot = function(dataModel, addClass){
+Model.initializeRoot = function(dataModel, addClass){
 	if(addClass){
-		dataModel.Class = {instanceSchema: exports.modelSchema};
-		dataModel.Class = exports.ModelsModel(dataModel);
+		dataModel.Class = {instanceSchema: Model.modelSchema};
+		dataModel.Class = Model.ModelsModel(dataModel);
 	}
 	modelPaths = {}; // reset model paths
 	setPath(dataModel);
@@ -101,10 +71,10 @@ function setPath(model, path, name){
 	}
 }
 
-exports.createModelsFromModel = function(sourceModel, models, constructor){
+Model.createModelsFromModel = function(sourceModel, models, constructor){
 	// this allows you to create a set of models from another source model. This makes
 	// it easy to have a RESTful interface for creating new models
-	constructor = constructor || exports.Model; 
+	constructor = constructor || Model; 
 	models = models || {};
 	sourceModel.query("").forEach(createSchema);
 	if(sourceModel.subscribe){
@@ -120,7 +90,7 @@ exports.createModelsFromModel = function(sourceModel, models, constructor){
 	return models;
 }
 
-exports.modelSchema = {
+Model.modelSchema = {
 	maxLimit: Infinity,
 	id: "Class",
 	properties:{
@@ -128,19 +98,19 @@ exports.modelSchema = {
 	}
 };
 
-exports.ModelsModel = function(models){
+Model.ModelsModel = function(models){
 	var schemas = {};
 	for(var i in models){
 		schemas[i] = models[i].instanceSchema;
 		if(typeof schemas[i] == "object"){
 			Object.defineProperty(schemas[i], "schema", {
-				value: exports.modelSchema,
+				value: Model.modelSchema,
 				enumerable: false
 			});
 		}
 	}
 	var modelStore = require("./store/memory").Memory({index: schemas});
-	return exports.Model(modelStore, exports.modelSchema);
+	return Model.Model(modelStore, Model.modelSchema);
 };
 /*var classStore = require("./store/memory").Memory({index: schemas});
 classStore.put = function(object, directives){
@@ -150,8 +120,9 @@ classStore.put = function(object, directives){
 	var oldApp = fs.read("lib/app.js");
 	fs.write("lib/app.js", oldApp + '\nrequire("model/' + object.id + '");');
 };
-exports.classModel = exports.Model("Class", classStore, exports.classSchema);
+Model.classModel = Model.Model("Class", classStore, Model.classSchema);
 */
-exports.getModelByPath = function(path) {
+Model.getModelByPath = function(path) {
 	return modelPaths[path];
 };
+module.exports = Model;

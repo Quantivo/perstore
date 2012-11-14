@@ -4,7 +4,7 @@
  
 ({define:typeof define!="undefined"?define:function(factory){module.exports=factory(require);}}).
 define(function(require){
-var JSONExt = require("commonjs-utils/json-ext");
+var JSONExt = require("../util/json-ext");
 var httpRequest = require("promised-io/http-client").request;
 var when = require("promised-io/promise").when;
 
@@ -85,7 +85,7 @@ function Remote(request, contextUrl){
 				headers.range = "items=" + options.start + '-' + options.end; 
 			}
 			query = query.replace(/\$[1-9]/g, function(t){
-				return JSON.stringify(options.parameters[t.substring(1) - 1]);
+				return JSONExt.stringify(options.parameters[t.substring(1) - 1]);
 			});
 			return when(request({
 				method:"GET",

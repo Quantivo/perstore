@@ -2,7 +2,7 @@
  * A very simple filesystem based storage
  */
 var fs = require("promised-io/fs"),
-	MIME_TYPES = require("jack/mime").MIME_TYPES,
+	MIME_TYPES = require("pintura/jsgi/mime").MIME_TYPES,
 	when = require("promised-io/promise").when,
 	AutoTransaction = require("../transaction").AutoTransaction;
 
@@ -10,7 +10,7 @@ function BinaryFile(){
 }
 
 var FileSystem = exports.FileSystem = function(options){
-	var fsRoot = require("commonjs-utils/settings").dataFolder || "data"
+	var fsRoot = require("../util/settings").dataFolder || "data"
 	if(options.dataFolder){
 		fsRoot = options.dataFolder.charAt(0) == '/' ? options.dataFolder : fsRoot + '/' + options.dataFolder;
 	}

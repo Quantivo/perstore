@@ -5,12 +5,12 @@
  * is added to the instances to indicate what schema/model each instance belongs to.
  * See tests/inherited.js for an example.   
  */
-var getLink = require("commonjs-utils/json-schema").getLink,
-	promise = require("promised-io/promise");
+var getLink = require("json-schema/lib/validate").getLink,
+	promise = require("promised-io/promise"),
 	subSchemas = {};
 exports.Inherited = function(store, schemaProperty){
 	// TODO: determine the schemaProperty from the schema's "schema" relation
-	schemaProperty = schemaProperty || "$schema";
+	schemaProperty = schemaProperty || "__schema__";
 	var hierarchy = [];
 	var id = promise.defer();
 	var inheritingStore = {};
@@ -68,7 +68,7 @@ exports.Inherited = function(store, schemaProperty){
 		}
 	};
 	inheritingStore.query = function(query, directives){
-		query = query + "&" + encodeURIComponent(schemaProperty) + "=(" + subSchemas[id] + ")"; 
+		query = query + "&in(" + encodeURIComponent(schemaProperty) + ",(" + subSchemas[id] + "))";
 		return store.query(query, directives);
 	};
 	inheritingStore.put = function(object, directives){

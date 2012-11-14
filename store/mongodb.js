@@ -12,9 +12,10 @@
 //
 
 var convertNodeAsyncFunction = require('promised-io/promise').convertNodeAsyncFunction,
-	mongo = require('mongodb/db'),
-	BSON = require('mongodb/bson/bson'),
-	Server = require("mongodb/connection").Server,
+	//Connection = require("mongodb/connection").Connection,
+	mongo = require('mongodb'),
+	ObjectID = require('bson/lib/bson/objectid').ObjectID,
+	Server = mongo.Server,
 	sys = require('util'),
 	defer = require("promised-io/promise").defer,
 	when = require("promised-io/promise").when,
@@ -23,10 +24,6 @@ var convertNodeAsyncFunction = require('promised-io/promise').convertNodeAsyncFu
 
 var RQ = require("rql/parser");
 //RQ.converters["default"] = exports.converters.auto;
-RQ.converters['re'] = function(x){
-dir('RECONV:', x);
-	return new RegExp(x, 'i');
-};
 
 // candidate for commonjs-utils?
 function dir(){var sys=require('sys');for(var i=0,l=arguments.length;i<l;i++)sys.debug(sys.inspect(arguments[i]));}
@@ -182,7 +179,7 @@ function dir(){var sys=require('sys');for(var i=0,l=arguments.length;i<l;i++)sys
 	}
 
 // this will return a data store
-exports.MongoDB = function(options){
+module.exports = function(options){
 	var ready = defer();
 	var collection, schema;
 
@@ -198,7 +195,7 @@ exports.MongoDB = function(options){
 		});
 	}
 
-	var dbOptions = require("commonjs-utils/settings").database;
+	var dbOptions = require("../util/settings").database;
 	var url = options.url || dbOptions.url;
 	if(url){
 		sys.puts(url);
@@ -213,7 +210,8 @@ exports.MongoDB = function(options){
 		});
 	}
 	else {
-		var database = options.database || new mongo.Db(dbOptions.name, new Server(dbOptions.host, dbOptions.port, {}), {});
+		var database = options.database || new mongo.Db(dbOptions.name, 
+				new Server(dbOptions.host, dbOptions.port, {}), {});
 		database.open(function(err, db){
 			if(err){
 				sys.puts("Failed to load mongo database " + dbOptions.name + " error " + err.message);
@@ -243,6 +241,9 @@ exports.MongoDB = function(options){
 			collection.findOne({id: id}, function(err, obj){
 				if (err) return deferred.reject(err);
 				if (obj) delete obj._id;
+				if(obj === null){
+					obj = undefined;
+				}
 //dir('GOT:', id, obj, query);
 				//if (???.queryString) {
 				//	var query = ???.queryString;
@@ -267,14 +268,14 @@ exports.MongoDB = function(options){
 				// do an insert, and check to make sure no id matches first
 				collection.findOne(search, function(err, found){
 					if (err) return deferred.reject(err);
-					if (found === undefined) {
-						if (!object.id) object.id = BSON.ObjectID.createPk().toJSON();
+					if (found === null) {
+						if (!object.id) object.id = ObjectID.createPk().toJSON();
 						collection.insert(object, function(err, obj){
 							if (err) return deferred.reject(err);
 							// .insert() returns array, we need the first element
 							obj = obj && obj[0];
 							if (obj) delete obj._id;
-							deferred.resolve(id);
+							deferred.resolve(obj.id);
 						});
 					} else {
 						deferred.reject(id + " exists, and can't be overwritten");
@@ -379,3 +380,4 @@ exports.MongoDB = function(options){
 		}
 	}
 }
+module.exports.MongoDB = module.exports;

@@ -4,17 +4,16 @@
  * for different application access points, different security levels, and different locales.
  */
 
-var NotFoundError = require("./errors").NotFoundError,
+var DatabaseError = require("./errors").DatabaseError,
 	AccessError = require("./errors").AccessError,
 	MethodNotAllowedError = require("./errors").MethodNotAllowedError,
-	defineProperties = require("commonjs-utils/es5-helper").defineProperties,
+	defineProperties = require("./util/es5-helper").defineProperties,
 	LazyArray = require("promised-io/lazy-array").LazyArray,
 	promiseModule = require("promised-io/promise"),
 	when = promiseModule.when,
-	all = promiseModule.all,
-	copy = require("commonjs-utils/copy").copy,
+	copy = require("./util/copy").copy,
 	Query = require("rql/query").Query,
-	substitute = require("commonjs-utils/json-schema").substitute,
+	substitute = require("json-schema/lib/validate").substitute,
 	rpcInvoke = require("./json-rpc").invoke;
 require("./coerce");// patches json-schema
 
@@ -27,15 +26,6 @@ Facet.facetFor = function(store, resolver, mediaType){
 		})[0];
 	}
 };
-try{
-	var readonlyEnforced = Object.create(Object.prototype);
-	defineProperties(readonlyEnforced,{test:{writable:false, value: false}});
-	readonlyEnforced.test = true;
-	readonlyEnforced = false;
-}
-catch(e){
-	readonlyEnforced = true;
-}
 var httpHandlerPrototype = {
 	options: function(id){
 		return Object.keys(this);
@@ -65,12 +55,15 @@ var httpHandlerPrototype = {
 
 };
 var NEW = {};
-function FacetedStore(store, facetSchema, permissive){
+function FacetedStore(store, facetSchema){
 	function constructor(){
 		return constructor.construct.apply(constructor, arguments);
 	}
+
+	var i;
+
 	facetSchema.prototype = facetSchema.prototype || {};
-	for(var i in facetSchema){
+	for(i in facetSchema){
 		constructor[i] = facetSchema[i];
 	}
 	constructor.instanceSchema = facetSchema;
@@ -78,11 +71,10 @@ function FacetedStore(store, facetSchema, permissive){
 	var needsOldVersion = constructOnNewPut;
 	var properties = constructor.properties;
 	var indexedProperties = {id: true};
-	for(var i in properties){
+	for(i in properties){
 		var propDef = properties[i];
 		if(propDef.readonly || propDef.blocked){
 			needsOldVersion = true;
-			break;
 		}
 		if(propDef.indexed){
 			indexedProperties[i] = true;
@@ -91,10 +83,10 @@ function FacetedStore(store, facetSchema, permissive){
 	constructor.id = store.id;
 	constructor.query= function(query, directives){
 		if(arguments.length === 0){
-			var query = Query();
+			query = Query();
 			query.executor = function(query){
 				return constructor.query(query.toString());
-			}
+			};
 			return query;
 		}
 		if(typeof facetSchema.query !== "function"){
@@ -119,8 +111,7 @@ function FacetedStore(store, facetSchema, permissive){
 			gt: "indexed",
 			sort: "indexed"
 		};
-	var maxLimit = constructor.maxLimit || store.maxLimit
-		|| 50;
+	var maxLimit = constructor.maxLimit || store.maxLimit || 50;
 
 	constructor.checkQuery = function(query){
 		var lastLimit;
@@ -141,7 +132,7 @@ function FacetedStore(store, facetSchema, permissive){
 					checkOperator(value);
 				}
 			});
-		}
+		};
 		checkOperator(Query(query), true);
 		if(!lastLimit && maxLimit != Infinity){
 			throw new RangeError("This user is not allowed to execute a query without a range specified through a Range header or a limit operator in the query like ?limit(10)");
@@ -153,6 +144,8 @@ function FacetedStore(store, facetSchema, permissive){
 	};
 
 	constructor.construct = function(instance, directives){
+		var result;
+
 		instance = this.wrap({}, this.transaction, instance, NEW);
 		for(var i in properties){
 			var propDef = properties[i];
@@ -164,14 +157,14 @@ function FacetedStore(store, facetSchema, permissive){
 		directives = directives || {};
 		directives.overwrite = false;
 		if(typeof facetSchema.construct === "function"){
-			var result = facetSchema.construct(instance, directives);
+			result = facetSchema.construct(instance, directives);
 			if(result === undefined){
 				result = instance;
 			}
 			return result;
 		}
 		if(typeof facetSchema.__noSuchMethod__ === "function"){
-			var result = facetSchema.__noSuchMethod__("construct", [instance, directives], true);
+			result = facetSchema.__noSuchMethod__("construct", [instance, directives], true);
 			if(result === undefined){
 				result = instance;
 			}
@@ -210,6 +203,8 @@ function FacetedStore(store, facetSchema, permissive){
 		return constructor.construct(props).save(directives);
 	};
 	constructor.put = function(props, directives){
+		var instance;
+
 		directives = directives || {};
 		if (!directives.id) {
 			directives.id = facetSchema.getId(props);
@@ -217,7 +212,7 @@ function FacetedStore(store, facetSchema, permissive){
 		if(typeof props.save !== "function"){
 			try{
 				if(needsOldVersion){
-					var instance = this.get(directives.id);
+					instance = this.get(directives.id);
 				}
 			}
 			catch(e){
@@ -230,7 +225,7 @@ function FacetedStore(store, facetSchema, permissive){
 						return self.add(props, directives);
 					}
 					// doesn't exist or exists but not loaded, we create a new instance
-					var instance = self.wrap({}, self.transaction, instance, NEW);
+					instance = self.wrap({}, self.transaction, instance, NEW);
 					return when(instance.save(directives), function(newInstance){
 						if(directives.id && (facetSchema.getId(newInstance) != directives.id)){
 							throw new Error("Object's id does not match the target URI");
@@ -246,14 +241,14 @@ function FacetedStore(store, facetSchema, permissive){
 					var lastModified = Date.parse(current["last-modified"]);
 					if(ifUnmodifiedSince && lastModified){
 						if(lastModified > ifUnmodifiedSince){
-							throw new Database(4, "Object has been modified since " + ifUnmodifiedSince);
+							throw new DatabaseError(4, "Object has been modified since " + ifUnmodifiedSince);
 						}
 					}
 					var etag = current.etag;
 					var ifMatch = incoming["if-match"];
 					if(etag && ifMatch){
 						if(etag != ifMatch){
-							throw new Database(4, "Object does match " + ifMatch);
+							throw new DatabaseError(4, "Object does match " + ifMatch);
 						}
 					}
 
@@ -278,7 +273,7 @@ function FacetedStore(store, facetSchema, permissive){
 		}
 		if(!directives.id){
 			// create a new object
-			return this.add(props);
+			return this.add(props, directives);
 		}
 		else{
 			// check to see if it is an RPC object
@@ -297,12 +292,11 @@ function FacetedStore(store, facetSchema, permissive){
 	// TODO: handle immutable proto
 	return constructor;
 }
-var mustBeValid = require("commonjs-utils/json-schema").mustBeValid;
-var validate = require("commonjs-utils/json-schema").validate;
+var mustBeValid = require("json-schema/lib/validate").mustBeValid;
+var validate = require("json-schema/lib/validate").validate;
 var writableProto = !!({}.__proto__);
 var SchemaControlled = function(facetSchema, sourceClass, permissive){
 	var properties = facetSchema.properties;
-	var idProperty = "id";
 	var schemaLinks = facetSchema.links || sourceClass.links;
 	var idTemplate;
 	if(schemaLinks && schemaLinks instanceof Array){
@@ -345,7 +339,7 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 		}
 	}
 	var splice = Array.prototype.splice;
-	return function createWrap(facetClass){
+	return function createWrap(){
 		return function wrap(source, transaction, wrapped, partial){
 			return when(source, function(source){
 				if(!source || typeof source !== "object"){
@@ -372,14 +366,16 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 				defineProperties(instancePrototype, {
 					load: {
 						value: function(){
+							var loadingSource;
+
 							if(facetSchema.allowed && !facetSchema.allowed(transaction.request, source)){
 								throw new AccessError("Access denied to " + source);
 							}
 							if(source.load && this != source){
-								var loadingSource = source.load();
+								loadingSource = source.load();
 							}
 							else{
-								var loadingSource = sourceClass.get(facetSchema.getId(source));
+								loadingSource = sourceClass.get(facetSchema.getId(source));
 							}
 							return when(loadingSource, function(loadingSource){
 								source = loadingSource;
@@ -399,6 +395,8 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 					defineProperties(instancePrototype,{
 						save: {
 							value: function(directives){
+								var i, id;
+
 								directives = directives || {};
 								if(this != source){
 									directives.previous = copy(source, {});
@@ -408,12 +406,12 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 								}
 								var validation = validate(this, facetSchema);
 								var instance = this;
-								for(var i in this){
+								for(i in this){
 									if(this.hasOwnProperty(i)){
 										transfer(this[i]);
 									}
 								}
-								for (var i in source){
+								for (i in source){
 									if(source.hasOwnProperty(i) && !this.hasOwnProperty(i)){
 										transfer(undefined);
 									}
@@ -422,22 +420,22 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 								var isNew = partial === NEW;
 								if(isNew && (typeof facetSchema.add === "function")){ //  || )
 									partial = undefined;
-									var id = facetSchema.add(source, directives);
+									id = facetSchema.add(source, directives);
 								}
 								else if(typeof facetSchema.put === "function"){
 									if(isNew){
 										directives.overwrite = false;
 									}
-									var id = facetSchema.put(source, directives);
+									id = facetSchema.put(source, directives);
 								}
 								else if(permissive && isNew && typeof sourceClass.add === "function"){
-									var id = sourceClass.add(source, directives);
+									id = sourceClass.add(source, directives);
 								}
 								else if(permissive && typeof sourceClass.put === "function"){
 									if(isNew){
 										directives.overwrite = false;
 									}
-									var id = sourceClass.put(source, directives);
+									id = sourceClass.put(source, directives);
 								}
 								else{
 									throw new MethodNotAllowedError("put is not allowed");
@@ -524,20 +522,22 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 								return copyOfSchema;
 							},
 							enumerable: false
-						},
+						}
 					});
 				}
 				function copyFromSource(){
-					for(var i in source){
+					var i, propDef;
+
+					for(i in source){
 						if(source.hasOwnProperty(i) && i != "schema"){
-							var propDef = properties && properties[i];
+							propDef = properties && properties[i];
 							if(!(propDef && propDef.blocked)){
 								wrapped[i] = source[i];
 							}
 						}
 					}
-					for(var i in properties){
-						var propDef = properties[i];
+					for(i in properties){
+						propDef = properties[i];
 						if(propDef.get){
 							wrapped[i] = propDef.get.call(source, i);
 						}
@@ -574,7 +574,7 @@ var SchemaControlled = function(facetSchema, sourceClass, permissive){
 			});
 		};
 	};
-}
+};
 function canFacetBeAppliedTo(appliesTo, store){
 	store = store._baseFacetedStore || store;
 	if(appliesTo && appliesTo != Object){
@@ -586,7 +586,7 @@ function canFacetBeAppliedTo(appliesTo, store){
 		}
 	}
 	return true;
-};
+}
 
 /**
  * Finds the best facet for the given store from the list of provided facets
@@ -600,7 +600,7 @@ exports.findBestFacet = function(store, facets){
 	while(true){
 		while((allIndex = appliesTos.indexOf(store, allIndex + 1)) > -1){
 			if((index = facets.indexOf(allInstances[allIndex])) > -1){
-				var facet = facets[index];
+				facet = facets[index];
 				if(!bestFacet || (facet.quality > (bestFacet.quality || 0.001))){
 					bestFacet = facet;
 				}
@@ -616,7 +616,7 @@ exports.findBestFacet = function(store, facets){
 
 
 function Facet(appliesTo, schema, permissive){
-	var baseFacetedStore = FacetedStore(appliesTo, schema);
+	var facetedStore, baseFacetedStore = FacetedStore(appliesTo, schema);
 	var createWrap = SchemaControlled(schema, appliesTo, permissive);
 	baseFacetedStore.wrap = createWrap(baseFacetedStore);
 	function FacetForStore(sourceStore, transaction){
@@ -626,7 +626,7 @@ function Facet(appliesTo, schema, permissive){
 		if(appliesTo == sourceStore){
 			facetedStore = function(){
 				return facetedStore.construct.apply(facetedStore, arguments);
-			}
+			};
 			facetedStore.__proto__ = baseFacetedStore;
 			facetedStore.wrap = createWrap(facetedStore);
 		}
@@ -642,7 +642,7 @@ function Facet(appliesTo, schema, permissive){
 	Facet.instances.push(baseFacetedStore);
 	appliesTos.push(appliesTo || Object);
 	return baseFacetedStore;
-};
+}
 var appliesTos = [];
 Facet.instances = [];
 
@@ -658,7 +658,7 @@ exports.Restrictive = function(appliesTo, schema){
 					return facet.wrap(appliesToPrototype[name].apply(source, args));
 				}
 				if(appliesToPrototype.__noSuchMethod__){
-					return facet.wrap(appliesToPrototype.__noSuchMethod__(name, args, onlyIfAvailable));
+					return facet.wrap(source.__noSuchMethod__(name, args, onlyIfAvailable));
 				}
 			}
 			if(!onlyIfAvailable){
@@ -682,13 +682,13 @@ exports.Restrictive = function(appliesTo, schema){
 			(function(i){
 				facet[i] = function(){
 					return facet.wrap(appliesTo[i].apply(appliesTo, arguments));
-				}
+				};
 			})(i);
 		}
 	}
 	return facet;
 
-}
+};
 var DELEGATE = function(){};
 exports.Permissive = function(appliesTo, schema){
 	schema = schema || {quality:0.5};
@@ -700,7 +700,7 @@ exports.Permissive = function(appliesTo, schema){
 				return facet.wrap(appliesToPrototype[name].apply(source, args));
 			}
 			if(appliesToPrototype.__noSuchMethod__){
-				return facet.wrap(appliesToPrototype.__noSuchMethod__(name, args, onlyIfAvailable));
+				return facet.wrap(source.__noSuchMethod__(name, args, onlyIfAvailable));
 			}
 			if(!onlyIfAvailable){
 				throw new MethodNotAllowedError(name + " is not allowed");
@@ -717,7 +717,7 @@ exports.Permissive = function(appliesTo, schema){
 			(function(i){
 				facet[i] = function(){
 					return facet.wrap(appliesTo[i].apply(appliesTo, arguments));
-				}
+				};
 			})(i);
 		}
 	}
